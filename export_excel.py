@@ -134,6 +134,61 @@ def write_excel_report(
 
     _auto_width(ws2)
 
+    # --- Sheet 2b: OLS Diagnostics (Newey-West) ---
+    ws_d = wb.create_sheet("OLS Diagnostics")
+    ws_d["A1"] = "Basket OLS — Newey-West HAC inference"
+    ws_d["A1"].font = Font(bold=True, size=13)
+    ws_d["A3"] = "Coefficient"
+    ws_d["B3"] = "Estimate"
+    ws_d["C3"] = "Std. Error (NW)"
+    ws_d["D3"] = "t-stat"
+    ws_d["E3"] = "p-value"
+    ws_d["F3"] = "Sig."
+    for c in ("A3", "B3", "C3", "D3", "E3", "F3"):
+        ws_d[c].fill = hdr_fill
+        ws_d[c].font = hdr_font
+        ws_d[c].alignment = Alignment(horizontal="center")
+
+    diag = prediction_dict.get("ols_diag") or {}
+
+    def _sig(p):
+        if p is None or (isinstance(p, float) and (p != p)):
+            return ""
+        if p < 0.001:
+            return "***"
+        if p < 0.01:
+            return "**"
+        if p < 0.05:
+            return "*"
+        if p < 0.10:
+            return "."
+        return ""
+
+    labels = [("intercept", "intercept"), ("w_EURUSD", "EUR/USD"),
+              ("w_GBPUSD", "GBP/USD"), ("w_USDJPY", "USD/JPY")]
+    for i, (k, lbl) in enumerate(labels, start=4):
+        est = diag.get(k)
+        se  = diag.get(f"se_{k}")
+        t   = diag.get(f"t_{k}")
+        p   = diag.get(f"p_{k}")
+        ws_d[f"A{i}"] = lbl
+        ws_d[f"B{i}"] = round(est, 6) if isinstance(est, (int, float)) else "N/A"
+        ws_d[f"C{i}"] = round(se, 6) if isinstance(se, (int, float)) else "N/A"
+        ws_d[f"D{i}"] = round(t, 3) if isinstance(t, (int, float)) else "N/A"
+        ws_d[f"E{i}"] = round(p, 4) if isinstance(p, (int, float)) else "N/A"
+        ws_d[f"F{i}"] = _sig(p)
+
+    ws_d["A9"] = "R²"
+    ws_d["B9"] = round(diag.get("r_squared"), 6) if isinstance(diag.get("r_squared"), (int, float)) else "N/A"
+    ws_d["A10"] = "N obs"
+    ws_d["B10"] = diag.get("n_obs", "N/A")
+    ws_d["A11"] = "NW lags"
+    ws_d["B11"] = diag.get("nw_lags", "N/A")
+
+    ws_d["A13"] = "Significance codes: *** p<.001, ** p<.01, * p<.05, . p<.10"
+    ws_d["A13"].font = Font(italic=True, size=9, color="595959")
+    _auto_width(ws_d)
+
     # --- Sheet 3: Rolling weights ---
     ws3 = wb.create_sheet("Rolling weights")
     q3 = """

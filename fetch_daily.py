@@ -141,19 +141,43 @@ def fetch_fx_rates(date_str: Optional[str] = None) -> Dict[str, Any]:
         ) from last_error
 
 
-def load_bct_fixing_from_env() -> Optional[float]:
-    """
-    BCT USD/TND mid fixing from BCT_FIX_MID environment variable (e.g. GitHub secret).
-    Returns None if unset or invalid — pipeline may use previous fixes only.
-    """
-    raw = os.environ.get("BCT_FIX_MID")
+def _coerce_float(raw) -> Optional[float]:
     if raw is None or str(raw).strip() == "":
         return None
     try:
         return float(str(raw).strip().replace(",", "."))
     except ValueError:
-        print("[load_bct_fixing_from_env] Warning: BCT_FIX_MID is not a valid float; ignoring.")
         return None
+
+
+def _slot_from_utc_hour() -> str:
+    """
+    Heuristic AM/PM slot for current scrape time.
+    BCT publishes morning fix ~10–11 Tunis time (~09–10 UTC) and evening fix ~16–17 Tunis
+    (~15–16 UTC). Cutoff at 13:00 UTC keeps AM/PM disjoint regardless of DST.
+    """
+    return "am" if datetime.utcnow().hour < 13 else "pm"
+
+
+def load_bct_fixing_from_env() -> Dict[str, Optional[float]]:
+    """
+    Returns {'fix_am', 'fix_pm', 'fix_mid'} from env vars.
+    Recognized vars: BCT_FIX_AM, BCT_FIX_PM, BCT_FIX_MID (legacy — falls into PM slot
+    if neither AM nor PM is given explicitly).
+    """
+    am  = _coerce_float(os.environ.get("BCT_FIX_AM"))
+    pm  = _coerce_float(os.environ.get("BCT_FIX_PM"))
+    mid_legacy = _coerce_float(os.environ.get("BCT_FIX_MID"))
+    if am is None and pm is None and mid_legacy is not None:
+        pm = mid_legacy  # legacy single-value convention -> treat as PM (closing ref)
+    mid = _compute_mid(am, pm)
+    return {"fix_am": am, "fix_pm": pm, "fix_mid": mid}
+
+
+def _compute_mid(am: Optional[float], pm: Optional[float]) -> Optional[float]:
+    if am is not None and pm is not None:
+        return (am + pm) / 2.0
+    return am if am is not None else pm
 
 
 def scrape_bct_fixing() -> Optional[float]:
@@ -188,30 +212,44 @@ def scrape_bct_fixing() -> Optional[float]:
         return None
 
 
-def load_bct_fixing() -> Optional[float]:
+def load_bct_fixing() -> Dict[str, Optional[float]]:
     """
-    Get BCT fixing: first try env var, then scrape from BCT website.
+    Returns {'fix_am', 'fix_pm', 'fix_mid'}.
+
+    Resolution order:
+      1) Env vars (BCT_FIX_AM, BCT_FIX_PM, or legacy BCT_FIX_MID -> PM slot).
+      2) Live BCT scrape (single value) assigned to AM or PM by UTC time-of-day.
+    Returns all-None dict if neither source yields a value.
     """
-    fixing = load_bct_fixing_from_env()
-    if fixing is not None:
-        return fixing
-    return scrape_bct_fixing()
+    env = load_bct_fixing_from_env()
+    if env["fix_am"] is not None or env["fix_pm"] is not None:
+        return env
+
+    live = scrape_bct_fixing()
+    if live is None:
+        return {"fix_am": None, "fix_pm": None, "fix_mid": None}
+    slot = _slot_from_utc_hour()
+    am = live if slot == "am" else None
+    pm = live if slot == "pm" else None
+    return {"fix_am": am, "fix_pm": pm, "fix_mid": _compute_mid(am, pm)}
 
 
 def upsert_fx_rates(conn: sqlite3.Connection, row_dict: Dict[str, Any]) -> None:
-    """INSERT OR REPLACE into fx_rates (full row each time)."""
+    """INSERT OR REPLACE into fx_rates (full row each time, AM/PM aware)."""
     now = datetime.utcnow().isoformat(timespec="seconds") + "Z"
     conn.execute(
         """
         INSERT OR REPLACE INTO fx_rates
-        (date, eurusd, gbpusd, usdjpy, fix_mid, ib_rate, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        (date, eurusd, gbpusd, usdjpy, fix_am, fix_pm, fix_mid, ib_rate, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             row_dict["date"],
             row_dict.get("eurusd"),
             row_dict.get("gbpusd"),
             row_dict.get("usdjpy"),
+            row_dict.get("fix_am"),
+            row_dict.get("fix_pm"),
             row_dict.get("fix_mid"),
             row_dict.get("ib_rate"),
             now,

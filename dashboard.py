@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go
 import streamlit as st
 
 ROOT = Path(__file__).resolve().parent
@@ -155,6 +156,102 @@ def main():
         file_name="tnd_dashboard_export.csv",
         mime="text/csv",
     )
+
+    render_intraday_section()
+
+
+@st.cache_data(ttl=15)
+def load_intraday(hours: int = 24):
+    """Load latest `intrinsic_intraday` rows. Returns empty df if table missing."""
+    if not DB_PATH.exists():
+        return pd.DataFrame()
+    import sqlite3
+
+    conn = sqlite3.connect(str(DB_PATH), check_same_thread=False)
+    try:
+        try:
+            q = f"""
+            SELECT ts, anchor_date, anchor_fix, basket_ret,
+                   intrinsic_v1, kf_state, kf_sigma, intrinsic_v2
+            FROM intrinsic_intraday
+            WHERE ts >= datetime('now', '-{int(hours)} hours')
+            ORDER BY ts ASC
+            """
+            df = pd.read_sql_query(q, conn)
+        except Exception:
+            return pd.DataFrame()
+    finally:
+        conn.close()
+
+    if df.empty:
+        return df
+    df["ts"] = pd.to_datetime(df["ts"], utc=True)
+    return df
+
+
+def render_intraday_section():
+    st.subheader("Intraday — real-time intrinsic")
+
+    c1, c2, c3 = st.columns([1, 1, 2])
+    with c1:
+        hours = st.selectbox("Window", [1, 4, 12, 24, 48, 168], index=3, format_func=lambda h: f"{h}h" if h < 24 else f"{h//24}d")
+    with c2:
+        autorefresh = st.checkbox("Auto-refresh (15s cache)", value=True)
+        if not autorefresh:
+            st.caption("toggle to invalidate cache")
+
+    df = load_intraday(hours=hours)
+    if df.empty:
+        st.info(
+            "No intraday data yet. Run `python run_realtime.py --interval 60` "
+            "to start emitting ticks into `intrinsic_intraday`."
+        )
+        return
+
+    last = df.iloc[-1]
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Latest tick (UTC)", last["ts"].strftime("%Y-%m-%d %H:%M"))
+    m2.metric("Intrinsic V2", f"{float(last['intrinsic_v2']):.5f}")
+    sigma = float(last.get("kf_sigma") or 0.0)
+    m3.metric("KF σ", f"{sigma:.5f}" if sigma > 0 else "—")
+    basket_pct = float(last["basket_ret"]) * 100.0
+    m4.metric("Basket Δ since anchor", f"{basket_pct:+.4f}%")
+
+    # Main intraday chart with ±2σ band around v2
+    fig = go.Figure()
+    if df["kf_sigma"].notna().any():
+        upper = df["intrinsic_v2"] + 2 * df["kf_sigma"].fillna(0)
+        lower = df["intrinsic_v2"] - 2 * df["kf_sigma"].fillna(0)
+        fig.add_trace(go.Scatter(x=df["ts"], y=upper, line=dict(width=0), showlegend=False, hoverinfo="skip"))
+        fig.add_trace(go.Scatter(
+            x=df["ts"], y=lower, line=dict(width=0), fill="tonexty",
+            fillcolor="rgba(0,212,170,0.15)", name="±2σ", hoverinfo="skip",
+        ))
+    fig.add_trace(go.Scatter(x=df["ts"], y=df["intrinsic_v1"], mode="lines",
+                             line=dict(color="#8A8F9C", width=1.2, dash="dot"),
+                             name="V1 (basket only)"))
+    fig.add_trace(go.Scatter(x=df["ts"], y=df["intrinsic_v2"], mode="lines",
+                             line=dict(color="#00D4AA", width=2.0),
+                             name="V2 (full model)"))
+    fig.add_hline(
+        y=float(last["anchor_fix"]),
+        line=dict(color="#F5C451", width=1, dash="dash"),
+        annotation_text=f"anchor fix · {last['anchor_date']}",
+        annotation_position="top left",
+    )
+    fig.update_layout(
+        height=380, hovermode="x unified",
+        margin=dict(l=40, r=20, t=20, b=30),
+        legend=dict(orientation="h", y=-0.18),
+        xaxis=dict(title="UTC"),
+        yaxis=dict(title="TND per USD"),
+    )
+    st.plotly_chart(fig, use_container_width=True)
+
+    with st.expander("Latest 50 ticks"):
+        tail = df.tail(50).copy()
+        tail["ts"] = tail["ts"].dt.strftime("%Y-%m-%d %H:%M:%S")
+        st.dataframe(tail, use_container_width=True, hide_index=True)
 
 
 if __name__ == "__main__":

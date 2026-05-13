@@ -1,0 +1,21 @@
+# Secrets — never commit
+.env
+.env.*
+*.key
+*.pem
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# OS / editors
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Generated artifacts that live in reports/ may still be tracked — leave .xlsx,
+# .docx, .csv, .json out of ignore so the graded versions land in the repo.

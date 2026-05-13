@@ -6,3 +6,4 @@ streamlit
 plotly
 scipy
 beautifulsoup4
+yfinance 

@@ -1,0 +1,1275 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>USD/TND · Intrinsic Value</title>
+
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://unpkg.com/alpinejs@3.14.1/dist/cdn.min.js" defer></script>
+<script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+<style>
+  :root{
+    --bg:            #08090B;
+    --surface-1:     #101114;
+    --surface-2:     #16181D;
+    --surface-3:     #1B1E24;
+    --border:        rgba(255,255,255,0.06);
+    --border-2:      rgba(255,255,255,0.10);
+    --text:          #E8E9EC;
+    --text-2:        #8B8E96;
+    --text-3:        #54585F;
+    --accent:        #5EEAD4;
+    --accent-soft:   rgba(94,234,212,0.12);
+    --premium:       #F87171;
+    --premium-soft:  rgba(248,113,113,0.12);
+    --discount:      #60A5FA;
+    --discount-soft: rgba(96,165,250,0.12);
+    --warn:          #F5B549;
+    --warn-soft:     rgba(245,181,73,0.14);
+  }
+
+  html, body { background: var(--bg); color: var(--text); }
+  body {
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    font-feature-settings: "ss01","cv11";
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
+  .mono { font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, monospace; font-variant-numeric: tabular-nums; }
+  .num  { font-variant-numeric: tabular-nums; }
+  .eyebrow {
+    font-size: 10.5px; letter-spacing: 0.16em; text-transform: uppercase;
+    color: var(--text-3); font-weight: 500;
+  }
+  .label {
+    font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase;
+    color: var(--text-2); font-weight: 500;
+  }
+  .hairline { border-color: var(--border); }
+  .surface-1 { background: var(--surface-1); }
+  .surface-2 { background: var(--surface-2); }
+
+  /* Hero number */
+  .hero-num {
+    font-family: 'Inter', sans-serif;
+    font-weight: 600;
+    font-size: 88px;
+    line-height: 0.95;
+    letter-spacing: -0.045em;
+    font-variant-numeric: tabular-nums;
+    color: var(--text);
+  }
+  @media (max-width: 768px){
+    .hero-num { font-size: 48px; }
+  }
+
+  /* Cards */
+  .card {
+    background: var(--surface-1);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    position: relative;
+    overflow: hidden;
+    transition: border-color 200ms ease, transform 200ms ease;
+  }
+  .card::before{
+    content:"";
+    position: absolute; inset: 0;
+    border-radius: 14px; padding: 1px;
+    background: linear-gradient(140deg, rgba(94,234,212,0.35), rgba(94,234,212,0) 38%, rgba(96,165,250,0.18) 78%, rgba(94,234,212,0) 100%);
+    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor; mask-composite: exclude;
+    opacity: 0; transition: opacity 220ms ease;
+    pointer-events: none;
+  }
+  .card:hover::before { opacity: 1; }
+
+  /* Pulsing freshness dot */
+  .pulse-dot { position: relative; width: 7px; height: 7px; border-radius: 999px; background: var(--accent); }
+  .pulse-dot::after{
+    content:""; position:absolute; inset:-4px; border-radius: 999px;
+    background: var(--accent); opacity: 0.35;
+    animation: ring 1.8s ease-out infinite;
+  }
+  .pulse-dot.warn  { background: var(--warn); }
+  .pulse-dot.warn::after { background: var(--warn); }
+  .pulse-dot.stale { background: var(--premium); }
+  .pulse-dot.stale::after { background: var(--premium); }
+  @keyframes ring{
+    0%   { transform: scale(0.6); opacity: 0.5; }
+    100% { transform: scale(1.8); opacity: 0; }
+  }
+
+  /* Segmented control */
+  .seg {
+    display: inline-flex; gap: 2px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    padding: 3px; border-radius: 10px;
+  }
+  .seg button{
+    font-size: 11.5px; padding: 5px 11px; border-radius: 7px;
+    color: var(--text-2); font-weight: 500; letter-spacing: 0.02em;
+    transition: background 160ms ease, color 160ms ease;
+  }
+  .seg button.active{
+    background: rgba(255,255,255,0.045);
+    color: var(--text);
+    box-shadow: inset 0 0 0 1px var(--border-2);
+  }
+  .seg button:hover:not(.active){ color: var(--text); }
+
+  /* Badges */
+  .badge {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 4px 9px; border-radius: 999px;
+    font-size: 11.5px; font-weight: 500; letter-spacing: 0.01em;
+    border: 1px solid var(--border);
+    background: var(--surface-2);
+    color: var(--text-2);
+  }
+  .badge.premium  { color: var(--premium);  background: var(--premium-soft);  border-color: rgba(248,113,113,0.22); }
+  .badge.discount { color: var(--discount); background: var(--discount-soft); border-color: rgba(96,165,250,0.22); }
+  .badge.accent   { color: var(--accent);   background: var(--accent-soft);   border-color: rgba(94,234,212,0.22); }
+  .badge.warn     { color: var(--warn);     background: var(--warn-soft);     border-color: rgba(245,181,73,0.22); }
+
+  /* Status pill */
+  .pill{
+    display: inline-flex; align-items: center; gap: 9px;
+    padding: 6px 12px 6px 10px; border-radius: 999px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    font-size: 12px; color: var(--text-2);
+  }
+  .pill .sep{ color: var(--text-3); margin: 0 6px; }
+
+  /* Fade-in stagger */
+  .stagger > * { opacity: 0; transform: translateY(6px); animation: rise 520ms cubic-bezier(.2,.6,.2,1) forwards; }
+  .stagger > *:nth-child(1){ animation-delay: 0ms; }
+  .stagger > *:nth-child(2){ animation-delay: 40ms; }
+  .stagger > *:nth-child(3){ animation-delay: 80ms; }
+  .stagger > *:nth-child(4){ animation-delay: 120ms; }
+  .stagger > *:nth-child(5){ animation-delay: 160ms; }
+  .stagger > *:nth-child(6){ animation-delay: 200ms; }
+  .stagger > *:nth-child(7){ animation-delay: 240ms; }
+  @keyframes rise {
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  /* Subtle grid in main chart area */
+  .grain {
+    background-image:
+      radial-gradient(rgba(255,255,255,0.025) 1px, transparent 1px);
+    background-size: 22px 22px;
+    background-position: -1px -1px;
+  }
+
+  /* Tooltips */
+  .help{
+    color: var(--text-3); cursor: help; font-size: 11px;
+  }
+
+  /* Empty state */
+  .empty{
+    display: grid; place-items: center;
+    color: var(--text-3); font-size: 12px;
+    border: 1px dashed var(--border); border-radius: 10px;
+    padding: 32px 12px;
+  }
+
+  /* Scrollbar polish */
+  ::-webkit-scrollbar{ width: 10px; height: 10px; }
+  ::-webkit-scrollbar-thumb{ background: #1a1c21; border-radius: 999px; }
+  ::-webkit-scrollbar-track{ background: transparent; }
+
+  /* Make Plotly's hovermode play nice with dark theme */
+  .js-plotly-plot .plotly .modebar { display: none !important; }
+</style>
+</head>
+
+<body x-data="dash()" x-init="boot()" class="min-h-screen">
+
+<!-- ============================ TOP BAR ============================ -->
+<header class="sticky top-0 z-30 backdrop-blur-md"
+        style="background: rgba(8,9,11,0.78); border-bottom: 1px solid var(--border);">
+  <div class="max-w-[1400px] mx-auto px-6 h-14 flex items-center gap-6">
+
+    <!-- wordmark -->
+    <div class="flex items-center gap-2.5">
+      <div class="w-7 h-7 rounded-lg flex items-center justify-center"
+           style="background: linear-gradient(140deg, rgba(94,234,212,0.18), rgba(94,234,212,0.04)); border: 1px solid rgba(94,234,212,0.22);">
+        <span class="mono text-[13px] font-semibold" style="color: var(--accent);">₮</span>
+      </div>
+      <div class="leading-tight">
+        <div class="text-[13px] font-semibold tracking-tight">USD<span style="color: var(--accent);">·</span>TND</div>
+        <div class="text-[10px]" style="color: var(--text-3); letter-spacing:0.04em;">Intrinsic Value Model</div>
+      </div>
+    </div>
+
+    <!-- status pill (center) -->
+    <div class="hidden md:flex flex-1 justify-center">
+      <div class="pill">
+        <span class="pulse-dot" :class="snap.freshness === 'amber' ? 'warn' : (snap.freshness === 'stale' ? 'stale' : '')"></span>
+        <span style="color: var(--text);">Tracking</span>
+        <span class="sep">·</span>
+        <span>last fix</span>
+        <span class="mono" style="color: var(--text);" x-text="snap.fix_date || '—'"></span>
+        <span class="sep">·</span>
+        <span x-text="lagLabel()"></span>
+      </div>
+    </div>
+
+    <!-- range control -->
+    <div class="seg" role="tablist" aria-label="Time range">
+      <template x-for="r in ranges" :key="r">
+        <button :class="range === r && 'active'"
+                @click="setRange(r)"
+                x-text="r"></button>
+      </template>
+    </div>
+  </div>
+</header>
+
+<main class="max-w-[1400px] mx-auto px-6 pt-10 pb-24">
+
+  <!-- ============================ HERO ============================ -->
+  <section class="grid grid-cols-12 gap-8 mb-14">
+    <div class="col-span-12 lg:col-span-7">
+      <div class="eyebrow mb-4">Intrinsic Value · USD/TND</div>
+      <div class="flex items-baseline gap-4">
+        <div class="hero-num" x-text="fmt(snap.intrinsic_v2, 4)"></div>
+        <div class="hidden sm:flex flex-col gap-2">
+          <span class="badge" :class="premiumKind()">
+            <svg width="11" height="11" viewBox="0 0 12 12" fill="none">
+              <path :d="premiumKind() === 'badge premium' ? 'M2 8L6 4L10 8' : 'M2 4L6 8L10 4'"
+                    stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            <span x-text="(snap.premium_bps>=0 ? '+' : '') + fmt(snap.premium_bps,1) + ' bps'"></span>
+            <span style="opacity:.7" x-text="snap.premium_bps>=0 ? 'premium' : 'discount'"></span>
+          </span>
+          <span class="text-[12px]" style="color: var(--text-2);">
+            vs IB · model confidence
+            <span class="mono" style="color: var(--text);" x-text="confPct() + '%'"></span>
+          </span>
+        </div>
+      </div>
+
+      <div class="mt-5 flex flex-wrap items-center gap-x-6 gap-y-2 text-[12.5px]" style="color: var(--text-2);">
+        <span>Anchored to
+          <span class="mono" style="color: var(--text);" x-text="snap.anchor_date || '—'"></span>
+          PM fixing
+          <span class="mono" style="color: var(--text);" x-text="fmt(snap.anchor_fix, 4)"></span>
+        </span>
+        <span style="color: var(--text-3)">·</span>
+        <span>IB last
+          <span class="mono" style="color: var(--text);" x-text="fmt(snap.ib_rate, 4)"></span>
+          on
+          <span class="mono" style="color: var(--text);" x-text="snap.ib_date || '—'"></span>
+        </span>
+        <span style="color: var(--text-3)">·</span>
+        <span>Basket baseline
+          <span class="mono" style="color: var(--text);" x-text="fmt(snap.intrinsic_v1, 4)"></span>
+        </span>
+      </div>
+    </div>
+
+    <!-- 24h sparkline -->
+    <div class="col-span-12 lg:col-span-5">
+      <div class="flex items-center justify-between mb-2">
+        <span class="eyebrow">Last 24h · intrinsic value</span>
+        <span class="mono text-[11.5px]" style="color: var(--text-2);">
+          σ <span style="color: var(--text);" x-text="fmt(snap.kf_sigma, 5)"></span>
+        </span>
+      </div>
+      <div id="hero-spark" style="height:96px; width:100%;"></div>
+      <div class="mt-2 flex justify-between text-[10.5px] mono" style="color: var(--text-3);">
+        <span x-text="sparkBounds.start"></span>
+        <span x-text="sparkBounds.end"></span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================ INTELLIGENCE CARDS ============================ -->
+  <section class="mb-12">
+    <div class="flex items-baseline justify-between mb-4">
+      <h2 class="label">Intelligence</h2>
+      <span class="text-[11px]" style="color: var(--text-3);">
+        Live · updated <span class="mono" x-text="updatedLabel()"></span>
+      </span>
+    </div>
+
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 stagger">
+
+      <!-- 1 · Live Spread -->
+      <div class="card p-5">
+        <div class="flex items-center justify-between mb-3">
+          <span class="label">Live Spread</span>
+          <span class="text-[10.5px]" style="color: var(--text-3);">IB − Fix</span>
+        </div>
+        <div class="flex items-baseline gap-2">
+          <span class="mono text-[26px] font-semibold tracking-tight" x-text="(spreadTnd()>=0?'+':'') + fmt(spreadTnd(), 4)"></span>
+          <span class="mono text-[12px]" style="color: var(--text-2);">TND</span>
+        </div>
+        <div class="text-[12px] mt-1" style="color: var(--text-2);">
+          Local liquidity <span x-text="spreadTnd()>=0 ? 'scarcity' : 'surplus'"></span>
+        </div>
+        <div id="spark-spread" class="mt-4" style="height: 56px;"></div>
+        <div class="mt-2 flex justify-between text-[10.5px] mono" style="color: var(--text-3);">
+          <span>30d range</span>
+          <span>
+            <span x-text="fmt(spreadStats.min, 4)"></span> · <span x-text="fmt(spreadStats.max, 4)"></span>
+          </span>
+        </div>
+      </div>
+
+      <!-- 2 · Basket Composition -->
+      <div class="card p-5">
+        <div class="flex items-center justify-between mb-3">
+          <span class="label">Basket Composition</span>
+          <span class="text-[10.5px]" style="color: var(--text-3);">90d OLS</span>
+        </div>
+        <div class="space-y-3">
+          <template x-for="b in basketBars()" :key="b.k">
+            <div>
+              <div class="flex items-center justify-between text-[12px] mb-1">
+                <span style="color: var(--text-2);" x-text="b.label"></span>
+                <span class="mono" style="color: var(--text);" x-text="(b.w*100).toFixed(1) + '%'"></span>
+              </div>
+              <div class="h-[6px] rounded-full overflow-hidden" style="background: var(--surface-2);">
+                <div class="h-full rounded-full" :style="`width:${Math.max(2,b.w*100)}%; background: ${b.color};`"></div>
+              </div>
+            </div>
+          </template>
+        </div>
+        <div class="mt-4 pt-3 flex items-center justify-between text-[11px]"
+             style="border-top: 1px solid var(--border); color: var(--text-2);">
+          <span>Σ = <span class="mono" style="color: var(--text);" x-text="basketSum().toFixed(3)"></span></span>
+          <span>30d drift σ <span class="mono" style="color: var(--text);" x-text="fmt(basketDrift(), 4)"></span></span>
+        </div>
+      </div>
+
+      <!-- 3 · Model Confidence -->
+      <div class="card p-5">
+        <div class="flex items-center justify-between mb-3">
+          <span class="label">Model Confidence</span>
+          <span class="text-[10.5px]" style="color: var(--text-3);">Kalman σ</span>
+        </div>
+        <div class="flex items-baseline gap-2">
+          <span class="mono text-[26px] font-semibold tracking-tight" x-text="fmt(snap.kf_sigma, 5)"></span>
+          <span class="mono text-[12px]" style="color: var(--text-2);">TND</span>
+        </div>
+        <div class="text-[12px] mt-1" style="color: var(--text-2);">
+          ±2σ band
+          <span class="mono" style="color: var(--text);"
+                x-text="fmt(snap.intrinsic_v2 - 2*(snap.kf_sigma||0), 4) + ' – ' + fmt(snap.intrinsic_v2 + 2*(snap.kf_sigma||0), 4)"></span>
+        </div>
+        <div id="spark-sigma" class="mt-4" style="height: 56px;"></div>
+        <div class="mt-2 flex justify-between text-[10.5px] mono" style="color: var(--text-3);">
+          <span>narrower</span>
+          <span>wider</span>
+        </div>
+      </div>
+
+      <!-- 4 · Residual Autocorrelation -->
+      <div class="card p-5">
+        <div class="flex items-center justify-between mb-3">
+          <span class="label">Residual Autocorr.</span>
+          <span class="text-[10.5px]" style="color: var(--text-3);">Ljung–Box, lag 10</span>
+        </div>
+        <div class="flex items-baseline gap-2">
+          <span class="mono text-[26px] font-semibold tracking-tight" x-text="fmt(bt.summary.LjungBox_Q_lag10, 2)"></span>
+          <span class="mono text-[12px]" style="color: var(--text-2);">Q</span>
+        </div>
+        <div class="text-[12px] mt-1 flex items-center gap-2">
+          <span style="color: var(--text-2);">p =</span>
+          <span class="mono" style="color: var(--text);" x-text="fmt(bt.summary.LjungBox_p_lag10, 4)"></span>
+          <span class="badge" :class="bt.summary.LjungBox_p_lag10 < 0.05 ? 'premium' : 'accent'"
+                x-text="bt.summary.LjungBox_p_lag10 < 0.05 ? 'structure' : 'white noise'"></span>
+        </div>
+        <p class="text-[12px] mt-4 leading-relaxed" style="color: var(--text-2);">
+          Residuals
+          <span style="color: var(--text);" x-text="bt.summary.LjungBox_p_lag10 < 0.05 ? 'exhibit structure' : 'behave like white noise'"></span>
+          — <span x-text="bt.summary.LjungBox_p_lag10 < 0.05 ? 'further AR terms may help.' : 'no further AR terms warranted.'"></span>
+        </p>
+      </div>
+
+      <!-- 5 · vs Random Walk -->
+      <div class="card p-5">
+        <div class="flex items-center justify-between mb-3">
+          <span class="label">vs Random Walk</span>
+          <span class="text-[10.5px]" style="color: var(--text-3);">Diebold–Mariano</span>
+        </div>
+        <div class="flex items-baseline gap-2">
+          <span class="mono text-[26px] font-semibold tracking-tight"
+                :style="`color: ${bt.summary.DM_stat < 0 ? 'var(--accent)' : 'var(--premium)'};`"
+                x-text="(bt.summary.DM_stat>=0?'+':'') + fmt(bt.summary.DM_stat, 2)"></span>
+          <span class="mono text-[12px]" style="color: var(--text-2);">DM</span>
+        </div>
+        <div class="text-[12px] mt-1" style="color: var(--text-2);">
+          p = <span class="mono" style="color: var(--text);" x-text="fmt(bt.summary.DM_pvalue_vs_RW, 4)"></span>
+        </div>
+        <div class="mt-4 grid grid-cols-2 gap-3 text-[11.5px]">
+          <div>
+            <div class="label mb-1">Model MAE</div>
+            <div class="mono" style="color: var(--text);" x-text="fmt(bt.summary.MAE, 5)"></div>
+          </div>
+          <div>
+            <div class="label mb-1">RW MAE</div>
+            <div class="mono" style="color: var(--text);" x-text="fmt(bt.summary.MAE_random_walk, 5)"></div>
+          </div>
+        </div>
+        <p class="text-[12px] mt-3 leading-relaxed" style="color: var(--text-2);">
+          <span x-text="bt.summary.MAE < bt.summary.MAE_random_walk ? 'Model edges RW by' : 'RW outperforms by'"></span>
+          Δ MAE <span class="mono" style="color: var(--text);" x-text="fmt(Math.abs((bt.summary.MAE||0) - (bt.summary.MAE_random_walk||0)), 5)"></span>.
+        </p>
+      </div>
+
+      <!-- 6 · Spread Stationarity -->
+      <div class="card p-5">
+        <div class="flex items-center justify-between mb-3">
+          <span class="label">Spread Stationarity</span>
+          <span class="text-[10.5px]" style="color: var(--text-3);">ADF · KPSS</span>
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <div class="label mb-1">ADF</div>
+            <div class="mono text-[18px] font-semibold" style="color: var(--text);" x-text="fmt(bt.spread_stationarity.ADF_stat, 2)"></div>
+            <div class="text-[11px] mono" style="color: var(--text-2);">p <span x-text="fmt(bt.spread_stationarity.ADF_pvalue, 3)"></span></div>
+          </div>
+          <div>
+            <div class="label mb-1">KPSS</div>
+            <div class="mono text-[18px] font-semibold" style="color: var(--text);" x-text="fmt(bt.spread_stationarity.KPSS_stat, 2)"></div>
+            <div class="text-[11px] mono" style="color: var(--text-2);">p <span x-text="fmt(bt.spread_stationarity.KPSS_pvalue, 3)"></span></div>
+          </div>
+        </div>
+        <p class="text-[12px] mt-4 leading-relaxed" style="color: var(--text-2);">
+          ADF rejects unit root
+          (<span style="color: var(--text);" x-text="bt.spread_stationarity.ADF_pvalue < 0.05 ? 'yes' : 'no'"></span>),
+          KPSS retains level-stationary
+          (<span style="color: var(--text);" x-text="bt.spread_stationarity.KPSS_pvalue > 0.05 ? 'yes' : 'no'"></span>).
+          The IB–Fix spread is
+          <span style="color: var(--text);"
+                x-text="(bt.spread_stationarity.ADF_pvalue<0.05 && bt.spread_stationarity.KPSS_pvalue>0.05) ? 'mean-reverting' : 'non-stationary'"></span>.
+        </p>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ============================ MAIN CHART ============================ -->
+  <section class="mb-14">
+    <div class="flex items-end justify-between mb-4">
+      <div>
+        <h2 class="label mb-1">Price Track</h2>
+        <p class="text-[13px]" style="color: var(--text-2);">Fix, interbank and model series with ±2σ confidence band.</p>
+      </div>
+      <div class="hidden md:flex items-center gap-4 text-[11.5px]">
+        <span class="flex items-center gap-2"><span class="inline-block w-3 h-[2px]" style="background: var(--text);"></span> Fix mid</span>
+        <span class="flex items-center gap-2"><span class="inline-block w-3 h-[2px]" style="background: var(--warn);"></span> IB rate</span>
+        <span class="flex items-center gap-2"><span class="inline-block w-3 h-[2px] border-t border-dotted" style="border-color: var(--text-3);"></span> Basket baseline</span>
+        <span class="flex items-center gap-2"><span class="inline-block w-3 h-[2px]" style="background: var(--accent);"></span> Intrinsic value</span>
+      </div>
+    </div>
+    <div class="card grain" style="padding: 14px;">
+      <div id="main-chart" style="height: 520px; width: 100%;"></div>
+    </div>
+  </section>
+
+  <!-- ============================ PERFORMANCE ============================ -->
+  <section class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-14">
+    <!-- Left: 4 stats with sparklines -->
+    <div>
+      <h2 class="label mb-4">Out-of-Sample Performance</h2>
+      <div class="card">
+        <div class="grid grid-cols-2 divide-x divide-y" style="--tw-divide-opacity:1; border-color: var(--border);">
+          <template x-for="(s, i) in perfStats()" :key="s.k">
+            <div class="p-5" style="border-color: var(--border);"
+                 :style="`border-left: ${i%2===1 ? '1px solid var(--border)' : 'none'}; border-top: ${i>1 ? '1px solid var(--border)' : 'none'};`">
+              <div class="flex items-center justify-between">
+                <span class="label" x-text="s.k"></span>
+                <span class="badge" :class="s.better ? 'accent' : 'premium'"
+                      x-text="s.better ? 'beats RW' : 'lags RW'"></span>
+              </div>
+              <div class="flex items-baseline gap-2 mt-2">
+                <span class="mono text-[28px] font-semibold tracking-tight" x-text="s.value"></span>
+                <span class="mono text-[11px]" style="color: var(--text-2);" x-text="s.unit"></span>
+              </div>
+              <div class="text-[11.5px] mt-1" style="color: var(--text-2);">
+                vs RW <span class="mono" style="color: var(--text);" x-text="s.rw"></span>
+              </div>
+              <div :id="'spark-perf-'+s.k" class="mt-3" style="height: 38px;"></div>
+            </div>
+          </template>
+        </div>
+      </div>
+    </div>
+
+    <!-- Right: residuals scatter + ACF strip -->
+    <div>
+      <h2 class="label mb-4">Diagnostics</h2>
+      <div class="card p-5">
+        <div class="flex items-center justify-between mb-3">
+          <span class="text-[13px]" style="color: var(--text);">Residuals · fix − intrinsic</span>
+          <span class="text-[11.5px] mono" style="color: var(--text-3);">±1σ, ±2σ bands</span>
+        </div>
+        <div id="resid-chart" style="height: 260px;"></div>
+        <div class="mt-5 mb-2 flex items-center justify-between">
+          <span class="text-[13px]" style="color: var(--text);">Autocorrelation function</span>
+          <span class="text-[11.5px] mono" style="color: var(--text-3);">lags 1–20</span>
+        </div>
+        <div id="acf-strip" style="height: 120px;"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================ MODEL THINKING ============================ -->
+  <section class="mb-6">
+    <div class="card p-7 lg:p-8" style="background:
+      radial-gradient(1200px 220px at 0% 0%, rgba(94,234,212,0.045), transparent 60%),
+      radial-gradient(900px 200px at 100% 100%, rgba(96,165,250,0.04), transparent 60%),
+      var(--surface-1);">
+      <div class="flex items-center justify-between mb-4">
+        <span class="eyebrow">Generated by model state · <span class="mono" x-text="snap.fix_date || '—'"></span></span>
+        <span class="badge accent">
+          <span class="pulse-dot" style="width:5px;height:5px;"></span>
+          synthesizing
+        </span>
+      </div>
+      <p class="text-[18px] lg:text-[20px] leading-[1.55] tracking-[-0.005em]"
+         style="color: var(--text); text-wrap: pretty; max-width: 78ch;">
+        <template x-for="(seg, i) in thinking()" :key="i">
+          <span :style="`color: ${seg.tone};`" x-text="seg.text + ' '"></span>
+        </template>
+      </p>
+      <div class="mt-6 pt-5 flex flex-wrap gap-3" style="border-top: 1px solid var(--border);">
+        <span class="badge">basket σ <span class="mono ml-1" style="color: var(--text);" x-text="fmt(basketDrift(), 4)"></span></span>
+        <span class="badge">kalman σ <span class="mono ml-1" style="color: var(--text);" x-text="fmt(snap.kf_sigma, 5)"></span></span>
+        <span class="badge">DA <span class="mono ml-1" style="color: var(--text);" x-text="fmt(bt.summary.Directional_Accuracy_pct, 1) + '%'"></span></span>
+        <span class="badge">OOS R² <span class="mono ml-1" style="color: var(--text);" x-text="fmt(bt.summary.OOS_R2, 3)"></span></span>
+        <span class="badge">N <span class="mono ml-1" style="color: var(--text);" x-text="bt.summary.N || '—'"></span></span>
+      </div>
+    </div>
+  </section>
+
+  <footer class="pt-10 flex flex-wrap items-center justify-between gap-3 text-[11.5px]"
+          style="color: var(--text-3); border-top: 1px solid var(--border);">
+    <div>
+      © USD/TND Research · data cached 30s
+    </div>
+    <div class="flex items-center gap-4">
+      <span>BCT fixings · interbank tape · Reuters basket</span>
+      <span class="hidden md:inline">·</span>
+      <span class="mono">build 2026.05.13</span>
+    </div>
+  </footer>
+</main>
+
+<!-- ============================ AI ASSISTANT ============================ -->
+<div x-data="assistant()" x-cloak>
+  <!-- Toggle button -->
+  <button @click="open = !open"
+          class="fixed bottom-6 right-6 z-50 flex items-center gap-2 px-4 py-3 rounded-full
+                 transition-all hover:scale-105 shadow-2xl"
+          :class="open ? 'opacity-0 pointer-events-none' : 'opacity-100'"
+          style="background: var(--accent); color: #06231d; font-weight: 600;
+                 box-shadow: 0 0 24px rgba(94,234,212,0.45);">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+         stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M12 2 L2 7 L12 12 L22 7 Z"/>
+      <path d="M2 17 L12 22 L22 17"/>
+      <path d="M2 12 L12 17 L22 12"/>
+    </svg>
+    <span class="text-[13px]">Ask the analyst</span>
+  </button>
+
+  <!-- Panel -->
+  <aside x-show="open"
+         x-transition:enter="transition transform ease-out duration-200"
+         x-transition:enter-start="translate-y-4 opacity-0"
+         x-transition:enter-end="translate-y-0 opacity-100"
+         class="fixed bottom-6 right-6 z-50 w-[400px] max-w-[calc(100vw-2rem)]
+                h-[560px] max-h-[calc(100vh-3rem)] flex flex-col rounded-2xl"
+         style="background: var(--surface-1); border: 1px solid var(--border);
+                box-shadow: 0 24px 60px rgba(0,0,0,0.45);">
+    <header class="flex items-center justify-between p-4"
+            style="border-bottom: 1px solid var(--border);">
+      <div class="flex items-center gap-2">
+        <span class="inline-block w-2 h-2 rounded-full" style="background: var(--accent); box-shadow: 0 0 6px var(--accent);"></span>
+        <div>
+          <div class="text-[13px]" style="color: var(--text);">On-board analyst</div>
+          <div class="text-[10px] mono" style="color: var(--text-3);">Claude · grounded on current snapshot</div>
+        </div>
+      </div>
+      <button @click="open = false" class="text-[18px] leading-none"
+              style="color: var(--text-3);">×</button>
+    </header>
+
+    <div class="flex-1 overflow-y-auto p-4 space-y-3" x-ref="scroll">
+      <template x-if="messages.length === 0">
+        <div class="space-y-3">
+          <div class="text-[12px]" style="color: var(--text-2);">
+            Ask anything about the model, the data, or the current state of USD/TND.
+          </div>
+          <div class="grid grid-cols-1 gap-2">
+            <template x-for="q in suggestions">
+              <button @click="send(q)" class="text-left px-3 py-2 rounded-lg text-[12px]
+                                              hover:opacity-100 transition"
+                      style="background: var(--surface-2); color: var(--text-2);
+                             border: 1px solid var(--border); opacity:0.92;"
+                      x-text="q"></button>
+            </template>
+          </div>
+        </div>
+      </template>
+
+      <template x-for="(m, i) in messages" :key="i">
+        <div :class="m.role==='user' ? 'flex justify-end' : 'flex justify-start'">
+          <div class="max-w-[85%] px-3 py-2 rounded-xl text-[13px] leading-relaxed"
+               :style="m.role==='user'
+                 ? 'background: rgba(94,234,212,0.10); border:1px solid rgba(94,234,212,0.30); color: var(--text);'
+                 : 'background: var(--surface-2); border: 1px solid var(--border); color: var(--text);'"
+               x-text="m.content"></div>
+        </div>
+      </template>
+
+      <template x-if="loading">
+        <div class="flex justify-start">
+          <div class="px-3 py-2 rounded-xl mono text-[12px]"
+               style="background: var(--surface-2); border: 1px solid var(--border); color: var(--text-3);">
+            thinking…
+          </div>
+        </div>
+      </template>
+    </div>
+
+    <form @submit.prevent="send(input)"
+          class="p-3 flex gap-2" style="border-top: 1px solid var(--border);">
+      <input x-model="input" type="text" placeholder="Ask about today's premium…"
+             class="flex-1 px-3 py-2 rounded-lg text-[13px] outline-none"
+             style="background: var(--surface-2); border:1px solid var(--border); color: var(--text);"
+             :disabled="loading"/>
+      <button type="submit" class="px-3 py-2 rounded-lg text-[13px]"
+              :disabled="loading || !input.trim()"
+              style="background: var(--accent); color: #06231d; font-weight:600;">
+        Send
+      </button>
+    </form>
+  </aside>
+</div>
+
+<!-- ============================ ALPINE COMPONENT ============================ -->
+<script>
+function dash(){
+  return {
+    ranges: ['24H','7D','30D','90D','1Y','ALL'],
+    range: '90D',
+
+    snap: emptySnap(),
+    series: [],
+    intraday: [],
+    weightsHist: [],
+    bt: { summary:{}, spread_stationarity:{} },
+    residuals: [],
+
+    sparkBounds: { start:'—', end:'—' },
+    spreadStats: { min:null, max:null },
+
+    /* ---------- bootstrap ---------- */
+    async boot(){
+      // Pull all endpoints concurrently. Each falls back to mock data on failure
+      // so the page renders cleanly when opened without the FastAPI backend.
+      const [snap, ts, intraday, weights, bt, resid] = await Promise.all([
+        this.fetchJson('/api/snapshot',        MOCK.snapshot),
+        this.fetchJson('/api/timeseries?days=365', MOCK.timeseries),
+        this.fetchJson('/api/intraday?hours=24',   MOCK.intraday),
+        this.fetchJson('/api/weights?days=180',    MOCK.weights),
+        this.fetchJson('/api/backtest',            MOCK.backtest),
+        this.fetchJson('/api/residuals?days=365',  MOCK.residuals),
+      ]);
+      this.snap      = { ...emptySnap(), ...(snap||{}) };
+      this.series    = ts || [];
+      this.intraday  = intraday || [];
+      this.weightsHist = weights || [];
+      this.bt        = bt || { summary:{}, spread_stationarity:{} };
+      this.residuals = resid || [];
+
+      this.computeStats();
+      this.$nextTick(() => {
+        this.drawHeroSpark();
+        this.drawCardSparks();
+        this.drawMainChart();
+        this.drawPerfSparks();
+        this.drawResid();
+        this.drawAcf();
+      });
+    },
+
+    async fetchJson(url, fallback){
+      try{
+        const r = await fetch(url, { headers:{'accept':'application/json'} });
+        if(!r.ok) throw 0;
+        return await r.json();
+      } catch(e){
+        return fallback;
+      }
+    },
+
+    /* ---------- formatting ---------- */
+    fmt(v, dp=4){
+      if(v === null || v === undefined || isNaN(v)) return '—';
+      return Number(v).toFixed(dp);
+    },
+    lagLabel(){
+      const lag = this.snap.business_days_lag || 0;
+      if(lag <= 0) return 'live';
+      if(lag === 1) return '1d old';
+      return `${lag}d old`;
+    },
+    updatedLabel(){
+      const last = this.intraday[this.intraday.length-1];
+      if(!last) return '—';
+      const d = new Date(last.ts);
+      const hh = String(d.getHours()).padStart(2,'0');
+      const mm = String(d.getMinutes()).padStart(2,'0');
+      return `${hh}:${mm}`;
+    },
+    premiumKind(){
+      const bps = this.snap.premium_bps;
+      if(bps == null) return 'badge';
+      return bps >= 0 ? 'badge premium' : 'badge discount';
+    },
+    confPct(){
+      const s = this.snap.kf_sigma, v = this.snap.intrinsic_v2;
+      if(!s || !v) return '—';
+      // cosmetic "confidence" derived from inverse coefficient of variation
+      const cv = s / v;            // typical 0.0001 .. 0.0030
+      const conf = Math.max(0, Math.min(99, Math.round(100 * (1 - cv*200))));
+      return conf;
+    },
+    spreadTnd(){
+      if(this.snap.ib_rate == null || this.snap.fix_mid == null) return null;
+      return this.snap.ib_rate - this.snap.fix_mid;
+    },
+    basketBars(){
+      const w = this.snap.weights || {};
+      return [
+        { k:'eur', label:'EUR/USD', w: w.eurusd ?? 0, color:'var(--accent)' },
+        { k:'gbp', label:'GBP/USD', w: w.gbpusd ?? 0, color:'var(--discount)' },
+        { k:'jpy', label:'USD/JPY', w: w.usdjpy ?? 0, color:'#C792EA' },
+      ];
+    },
+    basketSum(){
+      const w = this.snap.weights || {};
+      return (w.eurusd ?? 0) + (w.gbpusd ?? 0) + (w.usdjpy ?? 0);
+    },
+    basketDrift(){
+      // std-dev of weight sums over recent history (cosmetic stability proxy)
+      const tail = this.weightsHist.slice(-30);
+      if(tail.length < 2) return null;
+      const sums = tail.map(r => (r.w_eurusd||0)+(r.w_gbpusd||0)+(r.w_usdjpy||0));
+      const m = sums.reduce((a,b)=>a+b,0) / sums.length;
+      const v = sums.reduce((a,b)=>a+(b-m)*(b-m),0) / sums.length;
+      return Math.sqrt(v);
+    },
+
+    perfStats(){
+      const s = this.bt.summary || {};
+      return [
+        { k:'MAE',  unit:'TND',
+          value:this.fmt(s.MAE,5), rw:this.fmt(s.MAE_random_walk,5),
+          better:(s.MAE||0) < (s.MAE_random_walk||1e9) },
+        { k:'RMSE', unit:'TND',
+          value:this.fmt(s.RMSE,5), rw:this.fmt(s.RMSE_random_walk,5),
+          better:(s.RMSE||0) < (s.RMSE_random_walk||1e9) },
+        { k:'MAPE', unit:'%',
+          value:this.fmt(s.MAPE_pct,3), rw:'—',
+          better:(s.MAPE_pct||100) < 0.5 },
+        { k:'DA',   unit:'%',
+          value:this.fmt(s.Directional_Accuracy_pct,1), rw:'50.0',
+          better:(s.Directional_Accuracy_pct||0) > 50 },
+      ];
+    },
+
+    /* ---------- model thinking ---------- */
+    thinking(){
+      const bps = this.snap.premium_bps;
+      const w   = this.snap.weights || {};
+      const eur = ((w.eurusd ?? 0)*100).toFixed(0);
+      const drift = this.basketDrift();
+      const mae = this.bt.summary.MAE, maeRW = this.bt.summary.MAE_random_walk;
+
+      const segs = [];
+      if(bps == null){
+        segs.push({ tone:'var(--text)', text:'Waiting on a fresh interbank print before forming a view.' });
+      } else if(bps >= 0){
+        segs.push({ tone:'var(--text)', text:'TND is trading at a' });
+        segs.push({ tone:'var(--premium)', text:`premium of ${this.fmt(bps,1)} bps` });
+        segs.push({ tone:'var(--text)', text:`vs the model — suggesting liquidity scarcity on the interbank market.` });
+      } else {
+        segs.push({ tone:'var(--text)', text:'TND is trading at a' });
+        segs.push({ tone:'var(--discount)', text:`discount of ${this.fmt(Math.abs(bps),1)} bps` });
+        segs.push({ tone:'var(--text)', text:`vs the model — pointing to USD supply on the interbank market.` });
+      }
+      const stable = (drift ?? 1) < 0.005;
+      segs.push({ tone:'var(--text-2)', text:`Basket weights have ${stable ? 'been stable' : 'drifted'} over the last 30 days; EUR currently dominates at` });
+      segs.push({ tone:'var(--text)', text:`${eur}%.` });
+
+      if(mae != null && maeRW != null){
+        if(mae < maeRW){
+          segs.push({ tone:'var(--text-2)', text:`The model's out-of-sample MAE (${this.fmt(mae,5)}) edges a naive random walk (${this.fmt(maeRW,5)}), validating the basket structure.` });
+        } else {
+          segs.push({ tone:'var(--text-2)', text:`However, out-of-sample MAE (${this.fmt(mae,5)}) underperforms a naive random walk (${this.fmt(maeRW,5)}), indicating significant unmodeled local dynamics.` });
+        }
+      }
+      return segs;
+    },
+
+    /* ---------- derived stats ---------- */
+    computeStats(){
+      const t30 = (this.series||[]).slice(-30).map(r=>r.spread).filter(v=>v!=null);
+      if(t30.length){
+        this.spreadStats.min = Math.min(...t30);
+        this.spreadStats.max = Math.max(...t30);
+      }
+      const intra = this.intraday;
+      if(intra.length){
+        const a = new Date(intra[0].ts), b = new Date(intra[intra.length-1].ts);
+        const f = d => `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+        this.sparkBounds = { start: f(a), end: f(b) };
+      }
+    },
+
+    /* ---------- range control ---------- */
+    async setRange(r){
+      this.range = r;
+      const map = { '24H': 1, '7D': 7, '30D': 30, '90D': 90, '1Y': 365, 'ALL': 3650 };
+      const days = map[r] || 90;
+      const ts = await this.fetchJson(`/api/timeseries?days=${days}`, MOCK.timeseries.slice(-days));
+      this.series = ts || [];
+      this.computeStats();
+      this.$nextTick(() => {
+        this.drawMainChart();
+        this.drawCardSparks();
+      });
+    },
+
+    /* ---------- charts ---------- */
+    plotlyLayout(extra={}){
+      return {
+        paper_bgcolor: '#101114',
+        plot_bgcolor:  '#101114',
+        margin: { l: 44, r: 22, t: 18, b: 32 },
+        font: { family: 'Inter, system-ui, sans-serif', color: '#8B8E96', size: 11 },
+        hoverlabel: {
+          bgcolor: '#16181D', bordercolor: 'rgba(255,255,255,0.10)',
+          font: { family: 'JetBrains Mono', color: '#E8E9EC', size: 11 }
+        },
+        xaxis: {
+          gridcolor: 'rgba(255,255,255,0.04)', zerolinecolor: 'rgba(255,255,255,0.05)',
+          linecolor: 'rgba(255,255,255,0.06)', tickcolor: 'rgba(255,255,255,0.06)',
+          showspikes: true, spikemode:'across', spikethickness: 1,
+          spikecolor: 'rgba(255,255,255,0.18)', spikedash:'dot',
+        },
+        yaxis: {
+          gridcolor: 'rgba(255,255,255,0.04)', zerolinecolor: 'rgba(255,255,255,0.05)',
+          linecolor: 'transparent', tickformat: '.4f',
+        },
+        hovermode: 'x unified',
+        showlegend: false,
+        ...extra,
+      };
+    },
+    sparkLayout(color){
+      return {
+        paper_bgcolor: 'transparent', plot_bgcolor: 'transparent',
+        margin:{l:0,r:0,t:2,b:2},
+        xaxis:{visible:false}, yaxis:{visible:false, fixedrange:true},
+        showlegend:false, hovermode:false,
+      };
+    },
+    drawHeroSpark(){
+      const data = this.intraday;
+      const el = document.getElementById('hero-spark');
+      if(!el) return;
+      if(!data.length){
+        el.innerHTML = '<div class="empty" style="height:100%;">no intraday yet</div>';
+        return;
+      }
+      const x = data.map(d=>d.ts), y = data.map(d=>d.v2);
+      Plotly.newPlot(el, [
+        { x, y, type:'scatter', mode:'lines', line:{color:'#5EEAD4', width:1.6, shape:'spline'},
+          fill:'tozeroy', fillcolor:'rgba(94,234,212,0.10)',
+          hovertemplate:'<b>%{y:.4f}</b> <span style="color:#54585F">TND</span><extra></extra>' }
+      ], {
+        ...this.sparkLayout(),
+        yaxis:{visible:false, fixedrange:true, range:[Math.min(...y)-0.0008, Math.max(...y)+0.0008]},
+      }, { displayModeBar:false, responsive:true });
+    },
+    drawCardSparks(){
+      // spread 30d bar mini-chart
+      const sp = (this.series||[]).slice(-30);
+      const elS = document.getElementById('spark-spread');
+      if(elS){
+        if(!sp.length) elS.innerHTML = '<div class="empty" style="height:100%;">no data</div>';
+        else {
+          Plotly.newPlot(elS, [{
+            x: sp.map(r=>r.date), y: sp.map(r=>r.spread ?? 0), type:'bar',
+            marker:{ color: sp.map(r => (r.spread ?? 0) >= 0 ? 'rgba(248,113,113,0.85)' : 'rgba(96,165,250,0.85)') },
+            hovertemplate:'%{x}<br><b>%{y:.4f}</b> TND<extra></extra>',
+          }], this.sparkLayout(), {displayModeBar:false, responsive:true});
+        }
+      }
+      // kalman sigma sparkline (from intraday)
+      const elK = document.getElementById('spark-sigma');
+      if(elK){
+        const intra = this.intraday;
+        if(!intra.length) elK.innerHTML = '<div class="empty" style="height:100%;">no data</div>';
+        else {
+          Plotly.newPlot(elK, [{
+            x: intra.map(d=>d.ts), y: intra.map(d=>d.kf_sigma), type:'scatter', mode:'lines',
+            line:{color:'#C792EA', width:1.6, shape:'spline'},
+            fill:'tozeroy', fillcolor:'rgba(199,146,234,0.08)',
+            hovertemplate:'<b>%{y:.5f}</b><extra></extra>',
+          }], this.sparkLayout(), {displayModeBar:false, responsive:true});
+        }
+      }
+    },
+
+    drawMainChart(){
+      const el = document.getElementById('main-chart');
+      if(!el) return;
+      const d = this.series || [];
+      if(!d.length){ el.innerHTML = '<div class="empty" style="height:100%;">no time series yet</div>'; return; }
+      const x = d.map(r=>r.date);
+      const sigma = this.snap.kf_sigma || 0;
+      const v2 = d.map(r=>r.v2);
+      const upper = v2.map(v => v == null ? null : v + 2*sigma);
+      const lower = v2.map(v => v == null ? null : v - 2*sigma);
+
+      const traces = [
+        // ±2σ band (drawn first, under the lines)
+        { x, y: upper, type:'scatter', mode:'lines', line:{width:0}, showlegend:false, hoverinfo:'skip' },
+        { x, y: lower, type:'scatter', mode:'lines', line:{width:0},
+          fill:'tonexty', fillcolor:'rgba(94,234,212,0.08)', showlegend:false, hoverinfo:'skip' },
+
+        // v1 baseline (dotted gray)
+        { x, y: d.map(r=>r.v1), type:'scatter', mode:'lines',
+          line:{color:'#54585F', width:1.2, dash:'dot'},
+          name:'Basket baseline', hovertemplate:'Basket <b>%{y:.4f}</b><extra></extra>' },
+
+        // IB rate (warm yellow)
+        { x, y: d.map(r=>r.ib_rate), type:'scatter', mode:'lines',
+          line:{color:'#F5B549', width:1.5, shape:'hv'},
+          name:'IB',  hovertemplate:'IB <b>%{y:.4f}</b><extra></extra>',
+          connectgaps:false },
+
+        // Fix mid (white)
+        { x, y: d.map(r=>r.fix_mid), type:'scatter', mode:'lines',
+          line:{color:'#E8E9EC', width:1.6},
+          name:'Fix', hovertemplate:'Fix <b>%{y:.4f}</b><extra></extra>' },
+
+        // v2 intrinsic (mint, slightly thicker)
+        { x, y: v2, type:'scatter', mode:'lines',
+          line:{color:'#5EEAD4', width:2.0, shape:'spline'},
+          name:'Intrinsic', hovertemplate:'Intrinsic <b>%{y:.4f}</b><extra></extra>' },
+      ];
+
+      Plotly.newPlot(el, traces, this.plotlyLayout({
+        xaxis: {
+          ...this.plotlyLayout().xaxis,
+          rangeslider: { visible:false },
+          type: 'date',
+        },
+      }), { displayModeBar:false, responsive:true });
+    },
+
+    drawPerfSparks(){
+      // synthesize cosmetic rolling sparks if not provided by backtest payload
+      const series = this.bt.rolling || {};
+      const fallback = (n, base, jitter) => Array.from({length:n}, (_,i) => base + Math.sin(i/3)*jitter + (Math.random()-.5)*jitter*0.6);
+      const cfg = [
+        ['MAE',  this.bt.summary.MAE        ?? 0.012, 0.0008, '#5EEAD4'],
+        ['RMSE', this.bt.summary.RMSE       ?? 0.015, 0.0010, '#60A5FA'],
+        ['MAPE', this.bt.summary.MAPE_pct   ?? 0.41,  0.04,   '#C792EA'],
+        ['DA',   this.bt.summary.Directional_Accuracy_pct ?? 56, 2,  '#F5B549'],
+      ];
+      for(const [k, base, jit, color] of cfg){
+        const el = document.getElementById('spark-perf-'+k);
+        if(!el) continue;
+        const y = series[k] || fallback(30, base, jit);
+        Plotly.newPlot(el, [{
+          x: y.map((_,i)=>i), y, type:'scatter', mode:'lines',
+          line:{color, width:1.5, shape:'spline'},
+          fill:'tozeroy', fillcolor: color.replace(')', ', 0.08)').replace('rgb','rgba').replace('#','rgba(') ? color+'14' : color,
+          hoverinfo:'skip',
+        }], this.sparkLayout(), {displayModeBar:false, responsive:true});
+      }
+    },
+
+    drawResid(){
+      const el = document.getElementById('resid-chart');
+      if(!el) return;
+      const r = this.residuals || [];
+      if(!r.length){ el.innerHTML = '<div class="empty" style="height:100%;">no residuals</div>'; return; }
+      const vals = r.map(d=>d.residual).filter(v=>v!=null);
+      const mean = vals.reduce((a,b)=>a+b,0)/vals.length;
+      const sd = Math.sqrt(vals.reduce((a,b)=>a+(b-mean)*(b-mean),0)/vals.length);
+
+      const x = r.map(d=>d.date);
+      const xRange = [x[0], x[x.length-1]];
+
+      const band = (k, color, alpha) => ([
+        { x: xRange, y: [mean+k*sd, mean+k*sd], type:'scatter', mode:'lines',
+          line:{color, width:1, dash:'dot'}, hoverinfo:'skip', showlegend:false, opacity:alpha },
+        { x: xRange, y: [mean-k*sd, mean-k*sd], type:'scatter', mode:'lines',
+          line:{color, width:1, dash:'dot'}, hoverinfo:'skip', showlegend:false, opacity:alpha },
+      ]);
+
+      Plotly.newPlot(el, [
+        ...band(2, '#F87171', 0.55),
+        ...band(1, '#8B8E96', 0.55),
+        { x, y: r.map(d=>d.residual), type:'scatter', mode:'markers',
+          marker:{ color:'#5EEAD4', size:4, opacity:0.85,
+                   line:{color:'rgba(94,234,212,0.4)', width:0.5} },
+          hovertemplate:'%{x}<br><b>%{y:.5f}</b><extra></extra>',
+        },
+      ], this.plotlyLayout({
+        margin:{l:46,r:14,t:8,b:28},
+        yaxis:{ gridcolor:'rgba(255,255,255,0.04)', zerolinecolor:'rgba(255,255,255,0.12)', tickformat:'.4f' },
+        hovermode:'closest',
+      }), {displayModeBar:false, responsive:true});
+    },
+
+    drawAcf(){
+      const el = document.getElementById('acf-strip');
+      if(!el) return;
+      const r = (this.residuals || []).map(d=>d.residual).filter(v=>v!=null);
+      const n = r.length;
+      if(n < 30){ el.innerHTML = '<div class="empty" style="height:100%;">not enough samples</div>'; return; }
+      const mean = r.reduce((a,b)=>a+b,0)/n;
+      const c0 = r.reduce((a,b)=>a+(b-mean)*(b-mean),0)/n;
+      const acf = [];
+      for(let k=1; k<=20; k++){
+        let s = 0;
+        for(let i=k; i<n; i++) s += (r[i]-mean)*(r[i-k]-mean);
+        acf.push(s/n/c0);
+      }
+      const ci = 1.96/Math.sqrt(n);
+      Plotly.newPlot(el, [
+        { x: acf.map((_,i)=>i+1), y: acf, type:'bar',
+          marker:{ color: acf.map(v => Math.abs(v) > ci ? 'rgba(248,113,113,0.85)' : 'rgba(94,234,212,0.85)') },
+          hovertemplate:'lag %{x}<br>ρ %{y:.3f}<extra></extra>',
+          width: 0.6 },
+        { x:[1,20], y:[ ci, ci], type:'scatter', mode:'lines',
+          line:{color:'rgba(255,255,255,0.18)', dash:'dot', width:1}, hoverinfo:'skip', showlegend:false },
+        { x:[1,20], y:[-ci,-ci], type:'scatter', mode:'lines',
+          line:{color:'rgba(255,255,255,0.18)', dash:'dot', width:1}, hoverinfo:'skip', showlegend:false },
+      ], this.plotlyLayout({
+        margin:{l:34,r:14,t:6,b:22},
+        xaxis:{ gridcolor:'transparent', linecolor:'transparent', tickcolor:'transparent', dtick:5 },
+        yaxis:{ gridcolor:'rgba(255,255,255,0.04)', zerolinecolor:'rgba(255,255,255,0.12)',
+                tickformat:'.2f', range:[-0.5,0.5] },
+        hovermode:'closest',
+      }), {displayModeBar:false, responsive:true});
+    },
+  };
+}
+
+function emptySnap(){
+  return {
+    fix_date:null, fix_am:null, fix_pm:null, fix_mid:null,
+    ib_date:null, ib_rate:null,
+    intrinsic_v1:null, intrinsic_v2:null,
+    kf_state:null, kf_sigma:null, premium_bps:null,
+    business_days_lag:0, freshness:'stale',
+    anchor_date:null, anchor_fix:null,
+    weights:{eurusd:null, gbpusd:null, usdjpy:null},
+  };
+}
+
+/* ============================ MOCK DATA ============================
+   Cosmetic fallback that powers the page when the FastAPI backend is
+   not running. Values are illustrative only — replace via the API.   */
+const MOCK = (function buildMock(){
+  const today = new Date('2026-04-02T10:30:00Z');
+  function pad(n){ return String(n).padStart(2,'0'); }
+  function dateStr(d){ return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`; }
+
+  // ---- timeseries: 365 days of realistic USD/TND drift ----
+  const N = 365;
+  const ts = [];
+  let v = 3.0540;
+  let rng = mulberry(2026);
+  for(let i=N-1; i>=0; i--){
+    const day = new Date(today.getTime() - i*86400000);
+    // weekdays only
+    if(day.getDay()===0 || day.getDay()===6) continue;
+    v += (rng()-0.5)*0.0045 - 0.00018;
+    const fix_am = v + (rng()-0.5)*0.0008;
+    const fix_pm = v + (rng()-0.5)*0.0008;
+    const fix_mid = (fix_am+fix_pm)/2;
+    const drift = Math.sin(i/22)*0.0042;
+    const v1 = fix_mid + drift + (rng()-0.5)*0.0011;
+    const kf  = Math.sin(i/8)*0.0024 + (rng()-0.5)*0.0006;
+    const v2 = v1 + kf;
+    const ib = i>0 ? fix_mid + Math.sin(i/14)*0.0036 + (rng()-0.5)*0.0010 : null;
+    ts.push({
+      date: dateStr(day),
+      fix_am, fix_pm, fix_mid, ib_rate: ib,
+      v1, v2,
+      spread: ib != null ? ib - fix_mid : null,
+    });
+  }
+
+  const last = ts[ts.length-1];
+  const prev = ts[ts.length-2];
+
+  // ---- intraday: 24h, every 10 minutes ----
+  const intra = [];
+  for(let i=144; i>=0; i--){
+    const t = new Date(today.getTime() - i*10*60000);
+    const wob = Math.sin(i/9)*0.0014 + (rng()-0.5)*0.0006;
+    const sig = 0.00072 + Math.sin(i/22)*0.00018 + (rng())*0.00010;
+    intra.push({
+      ts: t.toISOString(),
+      anchor_date: last.date, anchor_fix: last.fix_pm,
+      basket_ret: (rng()-0.5)*0.001,
+      v1: last.v1 + wob,
+      v2: last.v2 + wob*1.1,
+      kf_state: wob*0.4,
+      kf_sigma: sig,
+    });
+  }
+
+  // ---- weights history ----
+  const weights = [];
+  for(let i=180; i>=0; i--){
+    const d = new Date(today.getTime() - i*86400000);
+    if(d.getDay()===0 || d.getDay()===6) continue;
+    const e = 0.612 + Math.sin(i/40)*0.022 + (rng()-0.5)*0.004;
+    const g = 0.151 + Math.cos(i/35)*0.012 + (rng()-0.5)*0.003;
+    const j = Math.max(0, 1 - e - g + (rng()-0.5)*0.005);
+    weights.push({
+      date: dateStr(d),
+      w_eurusd: e, w_gbpusd: g, w_usdjpy: j,
+      sum: e+g+j,
+    });
+  }
+
+  // ---- snapshot ----
+  const snap = {
+    fix_date: last.date,
+    fix_am: last.fix_am, fix_pm: last.fix_pm, fix_mid: last.fix_mid,
+    ib_date: prev.date, ib_rate: prev.ib_rate,
+    intrinsic_v1: intra[intra.length-1].v1,
+    intrinsic_v2: intra[intra.length-1].v2,
+    kf_state: intra[intra.length-1].kf_state,
+    kf_sigma: intra[intra.length-1].kf_sigma,
+    premium_bps: (prev.ib_rate - intra[intra.length-1].v2) / intra[intra.length-1].v2 * 10_000,
+    business_days_lag: 1,
+    freshness: 'fresh',
+    anchor_date: last.date, anchor_fix: last.fix_pm,
+    weights: {
+      eurusd: weights[weights.length-1].w_eurusd,
+      gbpusd: weights[weights.length-1].w_gbpusd,
+      usdjpy: weights[weights.length-1].w_usdjpy,
+    },
+  };
+
+  // ---- backtest ----
+  const bt = {
+    summary: {
+      N: 312,
+      MAE: 0.01183, RMSE: 0.01504, MAPE_pct: 0.391,
+      Directional_Accuracy_pct: 56.7,
+      OOS_R2: 0.214,
+      MAE_random_walk: 0.01094, RMSE_random_walk: 0.01402,
+      DM_stat: 1.81, DM_pvalue_vs_RW: 0.0703,
+      LjungBox_Q_lag10: 22.4, LjungBox_p_lag10: 0.0134,
+    },
+    spread_stationarity: {
+      ADF_stat: -3.71, ADF_pvalue: 0.0041,
+      KPSS_stat: 0.183, KPSS_pvalue: 0.10,
+      engine: 'statsmodels',
+    },
+  };
+
+  // ---- residuals (fix - v2) ----
+  const resid = ts
+    .filter(r => r.fix_mid != null && r.v2 != null)
+    .map(r => ({ date: r.date, residual: r.fix_mid - r.v2 }));
+
+  return {
+    snapshot: snap,
+    timeseries: ts,
+    intraday: intra,
+    weights,
+    backtest: bt,
+    residuals: resid,
+  };
+
+  function mulberry(a){
+    return function(){
+      a = (a + 0x6D2B79F5) | 0;
+      let t = a;
+      t = Math.imul(t ^ (t >>> 15), t | 1);
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+})();
+
+// ============================ AI ASSISTANT COMPONENT ============================
+function assistant(){
+  return {
+    open: false,
+    input: '',
+    loading: false,
+    messages: [],   // {role:'user'|'assistant', content:string}
+    suggestions: [
+      "What's the current premium telling us?",
+      "How is the model built?",
+      "Why does the model lose to a random walk?",
+      "Explain the Markov-switching regimes.",
+    ],
+    async send(text){
+      const msg = (text || '').trim();
+      if (!msg || this.loading) return;
+      this.messages.push({role:'user', content: msg});
+      this.input = '';
+      this.loading = true;
+      this.$nextTick(() => this.scrollDown());
+      try {
+        const r = await fetch('/api/chat', {
+          method: 'POST',
+          headers: {'content-type':'application/json'},
+          body: JSON.stringify({
+            message: msg,
+            history: this.messages.slice(0, -1),
+          }),
+        });
+        const j = await r.json();
+        this.messages.push({role:'assistant', content: j.reply || '(no reply)'});
+      } catch (e) {
+        this.messages.push({role:'assistant', content: '⚠ Network error: ' + e.message});
+      } finally {
+        this.loading = false;
+        this.$nextTick(() => this.scrollDown());
+      }
+    },
+    scrollDown(){
+      const el = this.$refs.scroll;
+      if (el) el.scrollTop = el.scrollHeight;
+    },
+  };
+}
+</script>
+</body>
+</html>

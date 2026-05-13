@@ -1,0 +1,25 @@
+{
+  "summary": {
+    "N": 1263,
+    "MAE": 0.016302513326993735,
+    "RMSE": 0.0243582522769942,
+    "MAPE_pct": 0.5397941846256267,
+    "Directional_Accuracy_pct": 51.27591706539075,
+    "OOS_R2": 0.9707254479398242,
+    "MAE_random_walk": 0.0072959619952493995,
+    "RMSE_random_walk": 0.010297767440167865,
+    "DM_stat": -12.349970500738596,
+    "DM_pvalue_vs_RW": 4.872929260856912e-35,
+    "LjungBox_Q_lag10": 6847.732269757003,
+    "LjungBox_p_lag10": 0.0
+  },
+  "spread_stationarity": {
+    "ADF_stat": -2.842617173947991,
+    "ADF_pvalue": 0.052439340159108054,
+    "KPSS_stat": 1.6211484685737354,
+    "KPSS_pvalue": 0.01,
+    "engine": "statsmodels"
+  },
+  "warmup": 200,
+  "window": 90
+}

@@ -178,6 +178,7 @@ def predict_today(conn: sqlite3.Connection, db_path: Optional[str] = None) -> Di
         "r_squared": float(ols["r_squared"]),
         "prev_fix": prev_fix,
         "basket_ret_pct": float(basket_ret * 100.0),
+        "ols_diag": ols,
     }
 
 
