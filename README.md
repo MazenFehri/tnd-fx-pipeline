@@ -2,7 +2,7 @@
 
 A research-grade Python pipeline that computes a **real-time intrinsic value for the USD/TND exchange rate**, combining a fundamental basket of global currency moves with a stochastic adjustment for local Tunisian liquidity conditions.
 
-Produced for **IN 22-21 — Time Series Analysis** (Dr Eymen Errais).
+Produced for **IN Time Series Analysis** (Dr Eymen Errais).
 
 ---
 
