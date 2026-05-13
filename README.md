@@ -1,175 +1,301 @@
-# USD/TND Daily FX Prediction Pipeline
+# USD/TND — Real-Time Intrinsic Value Model
 
-This project maintains a SQLite database of historical FX rates and BCT USD/TND fixings, runs a **basket OLS regression with rolling 90-day weights + Kalman filter on the IB-fixing spread**, and generates daily predictions with Excel reports, optional Telegram notifications, and a Streamlit dashboard.
+A research-grade Python pipeline that computes a **real-time intrinsic value for the USD/TND exchange rate**, combining a fundamental basket of global currency moves with a stochastic adjustment for local Tunisian liquidity conditions.
 
-**Tech Stack (100% Free):**
-- **Data Sources**: exchangerate.host, frankfurter.app, ExchangeRate-API v6 (optional), BCT website scraping
-- **Storage**: SQLite database (`tnd.db`)
-- **Libraries**: NumPy, Pandas, Requests, OpenPyXL, Streamlit, Plotly, SciPy, BeautifulSoup4
-- **APIs**: Telegram Bot API (optional)
+Produced for **IN 22-21 — Time Series Analysis** (Dr Eymen Errais).
 
-## Project Overview
+---
 
-The pipeline consists of 12 Python files that work together to:
-1. Fetch daily FX rates from free APIs
-2. Clean and compute log-returns
-3. Train OLS models with rolling weights
-4. Apply Kalman filter to interbank spreads
-5. Generate predictions and export to Excel
-6. Send notifications via Telegram
-7. Display results in an interactive dashboard
+## What it does
 
-## Setup Instructions
+For every minute of the trading day the pipeline computes:
 
-### 1. Install Dependencies
-```bash
+```
+intrinsic = (BCT_anchor_fix) · exp(w₁·ΔEUR/USD + w₂·ΔGBP/USD + w₃·ΔUSD/JPY)
+            + Kalman_filtered_spread(IB_rate − BCT_fix)
+```
+
+- **Basket baseline** — rolling 90-day OLS on log-returns of EUR/USD, GBP/USD, USD/JPY, with Newey-West HAC standard errors.
+- **Liquidity adjustment** — AR(1) Kalman filter on the interbank-vs-fixing spread, parameters `(c, φ, Q, R)` jointly calibrated by maximum likelihood. A 2-regime Markov-switching extension is also fit.
+- **Macro overlay** — augments the spread regression with Brent, broad-USD (DXY) and VIX; finds DXY significant at p<0.001.
+
+The output is a continuously updating **fair-value estimate** for USD/TND, plus a **premium/discount in basis points** that flags how rich or cheap the dinar trades versus the model.
+
+---
+
+## At a glance
+
+| Layer | Tech |
+|---|---|
+| Language | Python 3.11 |
+| Store | SQLite (`data/tnd.db`) — 5 tables |
+| Modelling | NumPy, SciPy, statsmodels (optional), python-docx |
+| Backend | FastAPI + Uvicorn |
+| Frontend | Single-file SPA: Tailwind CDN + Alpine.js + Plotly — no build step |
+| AI assistant | Groq (Llama 3.3 70B) or Anthropic (Claude Haiku 4.5) |
+| Data sources | ExchangeRate-API v6, exchangerate.host, frankfurter.app, yfinance (intraday), FRED + Yahoo Finance fallback (macro) |
+| Notifications | Telegram Bot API (optional) |
+
+100% free / zero-cost stack — works without any paid API.
+
+---
+
+## Architecture
+
+```
+                        ┌─────────────────────────────────┐
+                        │  Daily pipeline (run_pipeline)  │
+                        │    fetch → predict → Excel      │
+                        │      → Telegram → backtest      │
+                        └─────────────┬───────────────────┘
+                                      │
+                                      ▼
+              ┌─────────────────────────────────────────────┐
+              │      SQLite (data/tnd.db) — 5 tables        │
+              │ fx_rates · predictions · fx_intraday        │
+              │ intrinsic_intraday · macro                  │
+              └────────────┬──────────────────┬─────────────┘
+                           │                  │
+                  ┌────────▼──────┐   ┌───────▼────────────┐
+                  │  Realtime     │   │  FastAPI (serve)   │
+                  │  tick loop    │   │  JSON API + SPA    │
+                  │  yfinance 1m  │   │  + LLM assistant   │
+                  └───────────────┘   └────────────────────┘
+```
+
+---
+
+## Quick start
+
+```powershell
+# 1. Install deps
 pip install -r requirements.txt
-```
+pip install python-docx fastapi uvicorn pydantic yfinance statsmodels
 
-### 2. Initialize Database
-```bash
+# 2. Initialize the database (idempotent)
 python init_db.py
-```
 
-### 3. Seed Historical Data
-The model requires at least 90 days of historical data with BCT fixings.
-
-```bash
+# 3. Seed historical data (one-off)
 python seed_db.py
-```
 
-This imports FX rates and fixings from `data/FX-CLEAN-Data.csv` and optionally IB rates from `data/ib.csv` (if available).
+# 4. Optional: configure secrets
+copy .env.example .env
+# edit .env — paste your Groq API key, Telegram tokens, etc.
 
-### 5. Run the Pipeline
-```bash
+# 5. Run the daily pipeline
 python run_pipeline.py
+
+# 6. Run the backtest
+python backtest.py
+
+# 7. Generate the Word-doc report
+python build_report.py
+
+# 8. Launch the dashboard
+python serve.py
+# → http://127.0.0.1:8000
 ```
 
-This automatically fetches today's BCT USD/TND fixing from the BCT website. Optional environment variables:
-- `EXCHANGERATE_API_KEY`: For premium FX API access
-- `BCT_FIX_MID`: Override today's BCT fixing (manual)
-- `TELEGRAM_BOT_TOKEN`: For notifications
-- `TELEGRAM_CHAT_ID`: Telegram chat ID
+For minute-resolution intraday operation:
 
-### 6. Launch Dashboard
-```bash
-streamlit run dashboard.py
+```powershell
+python run_realtime.py --interval 60      # tick every minute
+python run_realtime.py --once             # single tick (cron mode)
 ```
 
-## Pipeline Execution Flow
+---
 
-When you run `python run_pipeline.py`, here's what happens step-by-step:
+## Project structure
 
-### 1. **Scrape BCT Website** → Get Latest Fixing
-- Automatically fetches today's official USD/TND fixing from the BCT website
-- Uses BeautifulSoup to parse the exchange rates table
-- Extracts the USD rate (currently 2.9442 TND = 1 USD)
-- Falls back to environment variable `BCT_FIX_MID` if scraping fails
+```
+tnd-fx-pipeline/
+├── run_pipeline.py        # daily orchestrator: fetch → predict → Excel → notify → backtest
+├── run_realtime.py        # intraday loop runner
+├── realtime.py            # tick engine — yfinance + Kalman forward-propagation
+├── fetch_daily.py         # FX APIs (3-source fallback) + BCT AM/PM fixing scrape
+├── fetch_macro.py         # FRED + Yahoo fallback (Brent / DXY / VIX)
+├── clean_returns.py       # log-returns + IB-Fix spread (PM-preferred)
+├── model.py               # OLS w/ Newey-West HAC, rolling weights, MLE Kalman
+├── msk.py                 # 2-regime Markov-switching Kalman (Kim filter + MLE)
+├── macro_overlay.py       # Nested OLS leaderboard with macro covariates
+├── predict.py             # daily prediction; writes to predictions table
+├── backtest.py            # walk-forward MAE/RMSE/MAPE/DA, DM, Ljung-Box, ADF/KPSS
+├── export_excel.py        # 5-sheet workbook with charts
+├── build_report.py        # python-docx generator → reports/*.docx
+├── notify_telegram.py     # optional alert at end of daily run
+├── serve.py               # FastAPI backend — JSON API + LLM chat + SPA mount
+├── static/index.html      # Perplexity-style dashboard, no build step
+├── dashboard.py           # legacy Streamlit dashboard (superseded)
+├── init_db.py             # idempotent schema + forward-only migrations
+├── seed_db.py             # CSV bootstrap (FX-CLEAN-Data.csv + ib.csv)
+├── data/
+│   ├── tnd.db
+│   ├── FX-CLEAN-Data.csv
+│   └── ib.csv
+├── reports/
+│   ├── TND_Intrinsic_Value_Report.docx
+│   ├── tnd_report_YYYY-MM-DD.xlsx
+│   ├── backtest_metrics.json
+│   ├── backtest_trace.csv
+│   └── macro_overlay.json
+├── CONTEXT.md             # AI-handoff context file
+├── Project - TSA FV.pdf   # course specification
+├── .env.example           # template — copy to .env
+├── .gitignore
+├── README.md
+└── requirements.txt
+```
 
-### 2. **Fetch FX Rates** → EUR/USD, GBP/USD, USD/JPY
-- Queries multiple free APIs in priority order:
-  1. ExchangeRate-API v6 (with optional API key)
-  2. exchangerate.host
-  3. frankfurter.app
-- Gets latest rates for EUR/USD, GBP/USD, and USD/JPY
-- Stores all data in SQLite database
+---
 
-### 3. **Generate Predictions** → Basket Model + Kalman Filter
-- **Data Preparation**: Calculates log-returns and spreads from historical data
-- **Basket Model**: OLS regression with rolling 90-day weights on EUR/USD, GBP/USD, USD/JPY
-- **Kalman Filter**: Applied to interbank spreads for additional adjustment
-- **Predictions**: 
-  - `intrinsic_v1`: Basket model prediction
-  - `intrinsic_v2`: Basket + Kalman adjustment
-- Uses previous day's BCT fixing as the base for exponential growth calculation
+## Database schema
 
-### 4. **Create Excel Report** → Full Analysis
-- Generates `reports/tnd_report_YYYY-MM-DD.xlsx` with:
-  - Today's predictions and metrics
-  - Historical data and trends
-  - Model weights and R-squared
-  - Kalman spread analysis
-- Includes charts and formatted tables
+```sql
+CREATE TABLE fx_rates (
+    date TEXT PRIMARY KEY,
+    eurusd REAL, gbpusd REAL, usdjpy REAL,
+    fix_am REAL,           -- BCT morning fixing
+    fix_pm REAL,           -- BCT evening fixing (closing reference)
+    fix_mid REAL,          -- avg(am, pm) or whichever exists
+    ib_rate REAL,          -- interbank USD/TND (T-1 lag)
+    created_at TEXT
+);
 
-### 5. **Optional Notifications** → Telegram
-- Sends prediction summary via Telegram (if configured)
-- Requires `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` environment variables
+CREATE TABLE predictions (
+    date TEXT PRIMARY KEY,
+    intrinsic_v1 REAL,     -- basket baseline (anchor_fix · exp(basket_ret))
+    intrinsic_v2 REAL,     -- v1 + Kalman spread (the headline number)
+    w_eurusd REAL, w_gbpusd REAL, w_usdjpy REAL,
+    kf_spread REAL,
+    created_at TEXT
+);
 
-## Automatic BCT Fixing
+CREATE TABLE fx_intraday (
+    ts TEXT PRIMARY KEY,   -- ISO8601 UTC, minute resolution
+    eurusd REAL, gbpusd REAL, usdjpy REAL,
+    source TEXT, created_at TEXT
+);
 
-The pipeline automatically scrapes today's USD/TND fixing from the BCT (Banque Centrale de Tunisie) website at https://www.bct.gov.tn/bct/siteprod/cours.jsp?lang=en. This ensures the model uses the latest official fixing without manual intervention.
+CREATE TABLE intrinsic_intraday (
+    ts TEXT PRIMARY KEY,
+    anchor_date TEXT, anchor_fix REAL,
+    basket_ret REAL, intrinsic_v1 REAL,
+    kf_state REAL, kf_sigma REAL, intrinsic_v2 REAL,
+    created_at TEXT
+);
 
-- **How it works**: The `fetch_daily.py` script uses BeautifulSoup to parse the BCT's exchange rates table and extract the USD value.
-- **Fallback**: If scraping fails, it falls back to the `BCT_FIX_MID` environment variable (if set).
-- **Override**: You can manually set `BCT_FIX_MID` to override the scraped value for testing or corrections.
+CREATE TABLE macro (
+    date TEXT PRIMARY KEY,
+    brent REAL, dxy REAL, vix REAL,
+    source TEXT, created_at TEXT
+);
+```
 
-## File Descriptions
+---
 
-| File | Description |
-|------|-------------|
-| `init_db.py` | Creates SQLite tables for fx_rates and predictions |
-| `seed_db.py` | Imports historical FX, BCT fixings, and IB rates from CSV files |
-| `fetch_daily.py` | Fetches EUR/USD, GBP/USD, USD/JPY from APIs; scrapes BCT USD/TND fixing |
-| `clean_returns.py` | Computes log-returns and spreads |
-| `model.py` | OLS regression, rolling weights, Kalman filter |
-| `predict.py` | Generates daily predictions |
-| `export_excel.py` | Creates formatted Excel reports |
-| `notify_telegram.py` | Sends prediction alerts |
-| `run_pipeline.py` | Orchestrates the full daily process |
-| `dashboard.py` | Streamlit web app for visualization |
-| `requirements.txt` | Python dependencies |
-| `README.md` | This documentation |
+## API reference (FastAPI)
 
-## Data Files
+| Endpoint | Returns |
+|---|---|
+| `GET /api/snapshot` | latest fix, IB, intrinsic, premium bps, freshness pill |
+| `GET /api/timeseries?days=N` | daily history merged with predictions |
+| `GET /api/intraday?hours=N` | minute-resolution intrinsic values |
+| `GET /api/weights?days=N` | rolling basket weights history |
+| `GET /api/backtest` | walk-forward metrics + spread stationarity tests |
+| `GET /api/residuals?days=N` | `fix_mid − intrinsic_v2` over time |
+| `POST /api/chat` | LLM analyst (Groq or Anthropic, grounded on snapshot) |
+| `GET /` | the SPA |
 
-- `data/tnd.db`: SQLite database with historical data and predictions
-- `data/FX-CLEAN-Data.csv`: Historical FX rates and BCT fixings
-- `reports/`: Generated Excel reports
-- `data/ib.csv`: Interbank rates (optional)
+All endpoints are cached server-side for 30 seconds.
 
-## Usage
+---
 
-### Daily Operation
-Run `python run_pipeline.py` daily to:
-- Fetch latest FX rates
-- Update database
-- Generate predictions
-- Export Excel report
-- Send Telegram notification (if configured)
+## Configuration (`.env`)
 
-### Dashboard Features
-- Metric cards: Today's prediction, previous fixing, change %
-- Line chart: BCT fix vs intrinsic predictions
-- Rolling weights plot
-- Spread analysis
-- Data table with latest predictions
+Copy `.env.example` to `.env` and fill in:
 
-## Cost
+```ini
+# Provide ONE of these to enable the on-board LLM analyst:
+GROQ_API_KEY=gsk_...
+# ANTHROPIC_API_KEY=sk-ant-...
 
-**$0** — All components are free:
-- Public APIs (exchangerate.host, frankfurter.app)
-- SQLite (no server costs)
-- Streamlit (local dashboard)
-- Telegram Bot API
-- Python libraries (open-source)
+# Optional — daily Telegram push notifications
+TELEGRAM_BOT_TOKEN=
+TELEGRAM_CHAT_ID=
 
-## Troubleshooting
+# Optional — manual BCT fixings (skips the live scrape)
+BCT_FIX_AM=
+BCT_FIX_PM=
 
-- **No predictions**: Ensure at least 90 days of historical data with fix_mid
-- **Empty plots**: Run backfill if needed (historical predictions)
-- **API failures**: Pipeline tries multiple sources automatically
-- **Kalman spread = 0**: IB rates not imported; model falls back to basket-only
+# Optional — your own ExchangeRate-API v6 key
+EXCHANGERATE_API_KEY=
+```
+
+The `.env` file is git-ignored; never commit it.
+
+---
+
+## Key empirical findings
+
+Backtested over 1262 out-of-sample predictions (≈5 years):
+
+| Metric | Model V2 | Random Walk |
+|---|---:|---:|
+| MAE | 0.01630 | **0.00730** |
+| RMSE | 0.02436 | **0.01030** |
+| MAPE | 0.54% | — |
+| Directional Accuracy | 51.3% | — |
+| Out-of-sample R² | **0.971** | — |
+
+- The model achieves a high R² in *levels* but is **beaten by a one-day random walk** in absolute error (DM stat = −12.3, p ≈ 1e-35).
+- Residuals are strongly autocorrelated (Ljung-Box Q(10) = 6964, p ≈ 0) — significant structure remains uncaptured.
+- The spread is borderline non-stationary (ADF p = 0.052; KPSS rejects).
+- None of the basket coefficients is statistically significant after Newey-West correction — consistent with the BCT actively managing the fixing rather than freely floating against a basket.
+- **Macro overlay** finds the broad-dollar index (DXY) significant at p<0.001 as a driver of the IB-Fix spread (M3 adds +1.83% R² over M2).
+- **Markov-switching Kalman** improves log-likelihood by 184 over single-regime with 6 extra parameters — strongly rejects the single-regime null.
+
+The full quantitative tables, mathematical derivations, and discussion live in `reports/TND_Intrinsic_Value_Report.docx`.
+
+---
+
+## Features
+
+- ✅ AM/PM BCT fixing schema with UTC-hour slot detection
+- ✅ Real-time minute-resolution intraday engine (yfinance)
+- ✅ Forward-propagated Kalman state with ±2σ confidence band
+- ✅ Joint MLE calibration of `(c, φ, Q, R)`
+- ✅ Newey-West HAC inference on basket coefficients
+- ✅ Walk-forward backtest with DM, Ljung-Box, ADF/KPSS
+- ✅ Two-regime Markov-switching Kalman extension
+- ✅ Macro-overlay regression (Brent, DXY, VIX) with incremental R²
+- ✅ FastAPI dashboard with Perplexity-style dark UI
+- ✅ Embedded LLM analyst grounded on live snapshot
+- ✅ 5-sheet Excel report (Daily, History, OLS Diagnostics, Rolling weights, Backtest)
+- ✅ Auto-generated Word report (12 sections, fully populated from current DB)
+- ✅ Optional Telegram push notifications
+
+---
+
+## Honest limitations
+
+- Historical rows pre-date the AM/PM split — `fix_am` / `fix_pm` are populated only going forward.
+- The intraday engine depends on yfinance, which has rate limits and weekend gaps.
+- FRED is blocked on some networks; the fetcher falls back to Yahoo Finance automatically.
+- The IB rate is published with a one-day lag — the entire reason the model exists. The nowcasting handles this via forward-propagation; no exact intraday IB is observable.
+- BCT's managed-float behaviour means linear basket coefficients are mostly insignificant; the high OOS R² comes from slow-moving levels, not predictive power on returns.
+
+---
 
 ## License
 
-This project is for educational and research purposes. Use responsibly.
-|------|------|
-| `init_db.py` | Create `fx_rates` and `predictions` tables |
-| `fetch_daily.py` | Pull USD/EUR, USD/GBP, USD/JPY; upsert SQLite |
-| `clean_returns.py` | Build modeling frame from DB |
-| `model.py` | OLS, rolling regression, Kalman (numpy only) |
-| `predict.py` | Daily prediction + insert into `predictions` |
-| `export_excel.py` | `reports/tnd_report_YYYY-MM-DD.xlsx` |
-| `notify_telegram.py` | Optional Telegram message |
-| `run_pipeline.py` | Orchestrator for CI and local runs |
-| `dashboard.py` | Streamlit + Plotly UI |
+This project is educational coursework. Free to read, fork, and adapt for non-commercial purposes.
+
+---
+
+## Acknowledgements
+
+- **Dr Eymen Errais** — project supervisor, IN 22-21
+- **BCT (Banque Centrale de Tunisie)** — fixing publications
+- **FRED (St Louis Fed)** — macro covariates
+- **ExchangeRate-API, exchangerate.host, frankfurter.app, Yahoo Finance, Stooq** — free FX data
+- **Anthropic & Groq** — LLM inference for the on-board analyst
